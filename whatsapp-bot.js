@@ -1,297 +1,188 @@
 #!/usr/bin/env node
 /**
- * WhatsApp Minimalist Bot
- * Features: TagAll & HideTag Only
+ * WhatsApp Bot - FIXED VERSION
+ * Fixed: logger.child error
  * Author: Marr
- * Repository: github.com/Dhammmm11/WhatsApp-Minimal-Bot
  */
 
 const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
+const pino = require('pino'); // ✅ FIX: Tambah pino
 const readline = require('readline');
 const fs = require('fs');
-const path = require('path');
 
-// CONFIGURASI
+// Config
 const CONFIG = {
     BOT_NAME: "VOID-TAG-BOT",
     PREFIX: "!",
-    SESSION_PATH: "./sessions",
-    MAX_TAG_MEMBERS: 100,
-    VERSION: "1.0"
+    SESSION_PATH: "./sessions"
 };
 
-// Banner
 console.log(`
-╔══════════════════════════════════════╗
-║     WHATSAPP TAG BOT BY MARR         ║
-║     Features: !tagall & !hidetag     ║
-║     Version: ${CONFIG.VERSION}                      ║
-╚══════════════════════════════════════╝
+╔══════════════════════════════════╗
+║     WHATSAPP BOT BY MARR         ║
+║     Fixed Version                ║
+╚══════════════════════════════════╝
 `);
 
-// Menu Interaktif
 const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout
 });
 
 async function showMenu() {
-    console.log('\n📱 PILIH METODE LOGIN:');
-    console.log('1. QR Code (Scan dengan WhatsApp)');
-    console.log('2. Pairing Code (Masukkan nomor)');
-    console.log('3. Keluar');
+    console.log('\n📱 LOGIN METHOD:');
+    console.log('1. QR Code');
+    console.log('2. Pairing Code');
+    console.log('3. Exit');
     
-    rl.question('Pilih (1-3): ', async (choice) => {
-        switch(choice) {
-            case '1':
-                await startBot('qr');
-                break;
-            case '2':
-                rl.question('Masukkan nomor WhatsApp (628xxxxxxx): ', async (number) => {
-                    await startBot('pairing', number.replace(/\D/g, ''));
-                });
-                break;
-            case '3':
-                console.log('👋 Sampai jumpa!');
-                rl.close();
-                process.exit(0);
-                break;
-            default:
-                console.log('❌ Pilihan tidak valid!');
-                showMenu();
+    rl.question('Choose (1-3): ', async (choice) => {
+        if (choice === '1') {
+            await startBot('qr');
+        } else if (choice === '2') {
+            rl.question('Enter WhatsApp number (628xxxxxxx): ', async (number) => {
+                await startBot('pairing', number.replace(/\D/g, ''));
+            });
+        } else if (choice === '3') {
+            console.log('👋 Bye!');
+            rl.close();
+            process.exit(0);
+        } else {
+            console.log('❌ Invalid!');
+            showMenu();
         }
     });
 }
 
-// Main Bot Function
 async function startBot(loginMethod, phoneNumber = null) {
-    console.log(`\n🚀 Memulai bot dengan metode: ${loginMethod.toUpperCase()}...`);
+    console.log(`\n🚀 Starting with ${loginMethod.toUpperCase()}...`);
     
-    // Buat folder session
     if (!fs.existsSync(CONFIG.SESSION_PATH)) {
         fs.mkdirSync(CONFIG.SESSION_PATH, { recursive: true });
     }
     
     try {
-        // Load auth state
         const { state, saveCreds } = await useMultiFileAuthState(CONFIG.SESSION_PATH);
         const { version } = await fetchLatestBaileysVersion();
         
-        // Buat socket WhatsApp
+        // ✅ FIX: Gunakan pino sebagai logger
         const sock = makeWASocket({
             version,
-            logger: { level: 'silent' },
+            logger: pino({ level: 'silent' }), // ✅ INI FIXNYA
             printQRInTerminal: loginMethod === 'qr',
             auth: state,
             browser: Browsers.ubuntu('Chrome'),
             syncFullHistory: false
         });
         
-        // Handle connection
-        sock.ev.on('connection.update', async (update) => {
+        sock.ev.on('connection.update', (update) => {
             const { connection, lastDisconnect, qr } = update;
             
             if (qr && loginMethod === 'qr') {
-                console.log('\n🔗 Scan QR Code dengan WhatsApp:');
-                console.log('1. Buka WhatsApp → Settings → Linked Devices');
-                console.log('2. Pilih "Link a Device"');
-                console.log('3. Scan QR di bawah:\n');
+                console.log('\n🔗 Scan QR dengan WhatsApp:');
                 qrcode.generate(qr, { small: true });
-                
-                // Save QR untuk Termux
-                if (process.env.TERMUX_VERSION) {
-                    fs.writeFileSync('/sdcard/whatsapp_qr.txt', qr);
-                    console.log('\n📁 QR disimpan di: /sdcard/whatsapp_qr.txt');
-                }
             }
             
             if (connection === 'open') {
-                console.log('\n✅ Berhasil terhubung ke WhatsApp!');
+                console.log('\n✅ Connected!');
                 console.log(`🤖 Bot: ${CONFIG.BOT_NAME}`);
-                console.log(`📞 Nomor: ${sock.user?.id?.split(':')[0] || 'Unknown'}`);
-                console.log(`⚡ Prefix: ${CONFIG.PREFIX}`);
-                console.log('='.repeat(40));
-                console.log('💡 Command tersedia:');
-                console.log(`• ${CONFIG.PREFIX}tagall [pesan]`);
-                console.log(`• ${CONFIG.PREFIX}hidetag [pesan]`);
-                console.log(`• ${CONFIG.PREFIX}menu`);
-                console.log('='.repeat(40));
-                console.log('\n🔄 Bot siap menerima command...\n');
-                
-                // Auto simpan credentials
-                sock.ev.on('creds.update', saveCreds);
+                console.log(`📞 Number: ${sock.user?.id?.split(':')[0]}`);
+                console.log('💡 Commands: !tagall, !hidetag, !menu');
             }
             
             if (connection === 'close') {
-                const reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
-                if (reason === DisconnectReason.loggedOut) {
-                    console.log('❌ Logged out! Hapus folder sessions/ dan login ulang.');
-                    process.exit(1);
-                } else {
-                    console.log('⏸️  Koneksi terputus, mencoba reconnect...');
+                const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+                if (shouldReconnect) {
+                    console.log('Reconnecting...');
                     startBot(loginMethod, phoneNumber);
                 }
             }
         });
         
-        // Pairing Code System
+        sock.ev.on('creds.update', saveCreds);
+        
+        // Pairing Code
         if (loginMethod === 'pairing' && phoneNumber) {
             try {
                 const pairingCode = await sock.requestPairingCode(phoneNumber);
                 console.log('\n📱 PAIRING CODE:');
                 console.log('='.repeat(30));
-                console.log(`Nomor: ${phoneNumber}`);
-                console.log(`Kode: ${pairingCode}`);
+                console.log(`Number: ${phoneNumber}`);
+                console.log(`Code: ${pairingCode}`);
                 console.log('='.repeat(30));
-                console.log('\n📌 Cara pakai:');
-                console.log('1. Buka WhatsApp → Settings → Linked Devices');
-                console.log('2. Pilih "Link a Device"');
-                console.log('3. Masukkan kode pairing di atas');
+                console.log('\nEnter this code in WhatsApp:');
+                console.log('Settings → Linked Devices → Link a Device');
                 
-                // Save pairing code
                 fs.writeFileSync('./pairing_code.txt', 
-                    `Nomor: ${phoneNumber}\nKode: ${pairingCode}\nWaktu: ${new Date().toLocaleString()}`);
+                    `Number: ${phoneNumber}\nCode: ${pairingCode}`);
             } catch (error) {
-                console.log('❌ Gagal mendapatkan pairing code!');
-                console.log('Error:', error.message);
-                process.exit(1);
+                console.log('❌ Failed to get pairing code:', error.message);
             }
         }
         
-        // Message Handler
+        // Message handler
         sock.ev.on('messages.upsert', async ({ messages }) => {
             const msg = messages[0];
             if (!msg.message || msg.key.fromMe) return;
             
-            await handleMessage(sock, msg);
+            const from = msg.key.remoteJid;
+            const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+            
+            // Auto read
+            await sock.readMessages([msg.key]);
+            
+            if (text.startsWith(CONFIG.PREFIX + 'tagall')) {
+                try {
+                    const group = await sock.groupMetadata(from);
+                    const members = group.participants;
+                    const mentions = members.map(m => m.id);
+                    const message = text.replace(CONFIG.PREFIX + 'tagall', '').trim() || 'Hello everyone!';
+                    
+                    await sock.sendMessage(from, {
+                        text: `📢 ${message}\n\n${members.map(m => `@${m.id.split('@')[0]}`).join(' ')}`,
+                        mentions: mentions
+                    });
+                    
+                    console.log(`✓ Tagged ${members.length} members`);
+                } catch (e) {
+                    console.log('❌ Tagall failed');
+                }
+            }
+            
+            if (text.startsWith(CONFIG.PREFIX + 'hidetag')) {
+                try {
+                    const group = await sock.groupMetadata(from);
+                    const members = group.participants;
+                    const mentions = members.map(m => m.id);
+                    const message = text.replace(CONFIG.PREFIX + 'hidetag', '').trim() || 'Hidden message';
+                    
+                    await sock.sendMessage(from, {
+                        text: `\u200B${message}`,
+                        mentions: mentions
+                    });
+                    
+                    console.log(`✓ Hidden tag ${members.length} members`);
+                } catch (e) {
+                    console.log('❌ Hidetag failed');
+                }
+            }
+            
+            if (text.startsWith(CONFIG.PREFIX + 'menu')) {
+                await sock.sendMessage(from, {
+                    text: `🤖 *${CONFIG.BOT_NAME}*\n\nCommands:\n• ${CONFIG.PREFIX}tagall [message]\n• ${CONFIG.PREFIX}hidetag [message]\n• ${CONFIG.PREFIX}menu\n\nBy Marr`
+                });
+            }
         });
         
     } catch (error) {
         console.error('❌ Error:', error.message);
-        process.exit(1);
     }
 }
 
-// Message Handler
-async function handleMessage(sock, msg) {
-    try {
-        const from = msg.key.remoteJid;
-        const sender = msg.key.participant || from;
-        const isGroup = from.endsWith('@g.us');
-        
-        // Extract message text
-        let body = '';
-        const msgType = Object.keys(msg.message)[0];
-        
-        if (msgType === 'conversation') {
-            body = msg.message.conversation;
-        } else if (msgType === 'extendedTextMessage') {
-            body = msg.message.extendedTextMessage.text;
-        }
-        
-        // Log pesan
-        const timestamp = new Date().toLocaleTimeString();
-        console.log(`[${timestamp}] ${isGroup ? 'GROUP' : 'PV'} ${sender.split('@')[0]}: ${body.substring(0, 50)}...`);
-        
-        // Auto read
-        await sock.readMessages([msg.key]);
-        
-        // Check prefix
-        if (!body.startsWith(CONFIG.PREFIX)) return;
-        
-        // Parse command
-        const args = body.slice(CONFIG.PREFIX.length).trim().split(/ +/);
-        const command = args.shift().toLowerCase();
-        const text = args.join(' ');
-        
-        // Command handler
-        switch(command) {
-            case 'tagall':
-                if (!isGroup) {
-                    await sock.sendMessage(from, { text: '❌ Command ini hanya untuk grup!' });
-                    return;
-                }
-                
-                const group1 = await sock.groupMetadata(from);
-                if (group1.participants.length > CONFIG.MAX_TAG_MEMBERS) {
-                    await sock.sendMessage(from, { 
-                        text: `❌ Member terlalu banyak (max: ${CONFIG.MAX_TAG_MEMBERS})` 
-                    });
-                    return;
-                }
-                
-                const mentions1 = group1.participants.map(p => p.id);
-                const mentionText1 = group1.participants.map(p => `@${p.id.split('@')[0]}`).join(' ');
-                const message1 = text || '📢 Attention semua member!';
-                
-                await sock.sendMessage(from, {
-                    text: `📢 TAG ALL\n\n${message1}\n\n${mentionText1}`,
-                    mentions: mentions1
-                });
-                
-                console.log(`✅ Tagall executed (${group1.participants.length} members)`);
-                break;
-                
-            case 'hidetag':
-                if (!isGroup) {
-                    await sock.sendMessage(from, { text: '❌ Command ini hanya untuk grup!' });
-                    return;
-                }
-                
-                const group2 = await sock.groupMetadata(from);
-                const mentions2 = group2.participants.map(p => p.id);
-                const message2 = text || '👻 Pesan rahasia';
-                
-                // Zero-width space + hidden mentions
-                const invisibleChar = '\u200B';
-                const hiddenSpace = '‎'.repeat(5);
-                
-                await sock.sendMessage(from, {
-                    text: `${invisibleChar}${hiddenSpace}${message2}${hiddenSpace}`,
-                    mentions: mentions2
-                });
-                
-                console.log(`✅ Hidetag executed (${group2.participants.length} members)`);
-                break;
-                
-            case 'menu':
-            case 'help':
-                const helpText = `🤖 *${CONFIG.BOT_NAME}*\n\n` +
-                               `*Command Tersedia:*\n` +
-                               `• ${CONFIG.PREFIX}tagall [pesan] - Tag semua member\n` +
-                               `• ${CONFIG.PREFIX}hidetag [pesan] - Tag tanpa notif\n` +
-                               `• ${CONFIG.PREFIX}menu - Tampilkan ini\n\n` +
-                               `_Made by Marr • github.com/Dhammmm11_`;
-                await sock.sendMessage(from, { text: helpText });
-                break;
-                
-            case 'ping':
-                const start = Date.now();
-                await sock.sendMessage(from, { text: '🏓 Pong!' });
-                const latency = Date.now() - start;
-                await sock.sendMessage(from, { 
-                    text: `⏱️ Latency: ${latency}ms\n✅ Bot aktif!` 
-                });
-                break;
-                
-            default:
-                await sock.sendMessage(from, { 
-                    text: `❌ Command tidak dikenal!\nKetik ${CONFIG.PREFIX}menu untuk bantuan.` 
-                });
-        }
-        
-    } catch (error) {
-        console.error('❌ Error handling message:', error.message);
-    }
-}
+showMenu();
 
-// Handle exit
 process.on('SIGINT', () => {
-    console.log('\n🛑 Bot dihentikan...');
+    console.log('\n🛑 Stopped');
     rl.close();
     process.exit(0);
 });
-
-// Start menu
-showMenu();
